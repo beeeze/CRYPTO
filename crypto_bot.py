@@ -12,8 +12,8 @@ try:
     from config import BINANCE_API_KEY, BINANCE_API_SECRET
 except ImportError:
     import streamlit as st
-    BINANCE_API_KEY = st.secrets.get("BINANCE_API_KEY", "YOUR_BINANCE_US_API_KEY")
-    BINANCE_API_SECRET = st.secrets.get("BINANCE_API_SECRET", "YOUR_BINANCE_US_SECRET_KEY")
+    BINANCE_API_KEY = st.secrets.get(l0CunQm66vMeHwjpxM5RSKkyOC1lBAAftB7VGp0iPOwBwW6fl3lXXDhIy1THHGhu)
+    BINANCE_API_SECRET = st.secrets.get(wNyiS1bI1OyuAFO97kDSJpjSpXB7jE30dOLzhECTxb5RohniGKng5buQNAEihSl6)
 
 # ===== BINANCE CONNECTION =====
 client = Client(api_key=BINANCE_API_KEY, api_secret=BINANCE_API_SECRET, tld='us')

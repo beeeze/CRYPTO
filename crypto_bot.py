@@ -1,47 +1,28 @@
-# crypto_bot.py – All-in-One Crypto Trading Bot
+# crypto_bot.py – Math-Based Crypto Scanner with WebSocket (No Trade API Needed)
 
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 from scipy.stats import entropy
+from binance.websockets import BinanceSocketManager
 from binance.client import Client
+import websocket
+import json
 
 # ===== CONFIG SECTION =====
-# Replace with your Binance US API keys or use Streamlit Secrets
-try:
-    from config import BINANCE_API_KEY, BINANCE_API_SECRET
-except ImportError:
-    import streamlit as st
-    BINANCE_API_KEY = st.secrets.get(l0CunQm66vMeHwjpxM5RSKkyOC1lBAAftB7VGp0iPOwBwW6fl3lXXDhIy1THHGhu)
-    BINANCE_API_SECRET = st.secrets.get(wNyiS1bI1OyuAFO97kDSJpjSpXB7jE30dOLzhECTxb5RohniGKng5buQNAEihSl6)
+# We're only using read-only WebSocket, so no API keys needed
 
-# ===== BINANCE CONNECTION =====
-client = Client(api_key=BINANCE_API_KEY, api_secret=BINANCE_API_SECRET, tld='us')
-
-# ===== DATA FETCHING =====
-def get_ohlc(symbol, interval='1m', limit=100):
-    klines = client.get_klines(symbol=symbol, interval=interval, limit=limit)
-    df = pd.DataFrame(klines, columns=[
-        'timestamp', 'open', 'high', 'low', 'close', 'volume',
-        'close_time', 'quote_asset_volume', 'number_of_trades',
-        'taker_buy_base_volume', 'taker_buy_quote_volume', 'ignore'
-    ])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-    numeric_cols = ['open', 'high', 'low', 'close', 'volume']
-    df[numeric_cols] = df[numeric_cols].astype(float)
-    return df
-
-def get_all_symbols():
-    exchange_info = client.get_exchange_info()
-    symbols = [s['symbol'] for s in exchange_info['symbols'] if 'USDT' in s['symbol']]
-    return symbols
+# Create Binance client (only for symbol list)
+client = Client("", "")  # No keys needed for public data
 
 # ===== PATTERN DETECTION =====
 def detect_fft_pattern(prices):
     fft_result = np.fft.fft(prices)
     freq = np.fft.fftfreq(len(prices))
-    dominant_freq = freq[np.argmax(np.abs(fft_result[1:len(freq)//2])]  # Fixed
+    segment = fft_result[1:len(freq)//2]
+    abs_fft = np.abs(segment)
+    max_index = np.argmax(abs_fft)
+    dominant_freq = freq[max_index]
     return dominant_freq
 
 def calculate_entropy(prices):
@@ -67,8 +48,8 @@ def get_pattern_signal(prices):
 # ===== LOW-CAP COIN SCANNER =====
 def scan_lowcap_coins(min_market_cap=50_000_000):
     candidates = []
-    symbols = get_all_symbols()
-
+    symbols = [s['symbol'] for s in client.get_exchange_info()['symbols'] if 'USDT' in s['symbol']]
+    
     for symbol in symbols:
         try:
             ticker = client.get_symbol_ticker(symbol=symbol)
@@ -76,8 +57,6 @@ def scan_lowcap_coins(min_market_cap=50_000_000):
 
             stats = client.get_ticker(symbol=symbol)
             volume_change = float(stats['priceChangePercent'])
-            volume_24h = float(stats['quoteVolume'])
-
             market_cap = price * float(stats['weightedAvgPrice'])  # rough estimate
 
             if market_cap < min_market_cap and abs(volume_change) > 10:
@@ -92,20 +71,42 @@ def scan_lowcap_coins(min_market_cap=50_000_000):
 
     return candidates
 
+# ===== WEBSOCKET FOR BTC/USDT =====
+BTC_PRICE_HISTORY = []
+
+def on_message(ws, message):
+    data = json.loads(message)
+    price = float(data['k']['c'])  # Close price from kline update
+    BTC_PRICE_HISTORY.append(price)
+    if len(BTC_PRICE_HISTORY) > 100:
+        BTC_PRICE_HISTORY.pop(0)
+
+def start_websocket():
+    bm = BinanceSocketManager(client)
+    conn_key = bm.start_kline_socket('BTCUSDT', on_message, interval='1m')
+    bm.start()
+
+# Start WebSocket in background
+import threading
+threading.Thread(target=start_websocket, daemon=True).start()
+
 # ===== STREAMLIT DASHBOARD =====
 st.set_page_config(page_title="🧠 Crypto Pattern Detection Bot", layout="wide")
-st.title("🧠 Quantitative Crypto Trading Bot")
-st.markdown("Uses advanced math to detect early price movements and low-cap coins with potential.")
+st.title("🧠 Quantitative Crypto Signal Detector")
+
+st.markdown("Uses advanced math to detect early price movement and low-cap coins with potential.")
 
 # BTC Signal
-btc_df = get_ohlc('BTCUSDT')
-btc_signal = get_pattern_signal(btc_df['close'].values)
+if len(BTC_PRICE_HISTORY) >= 30:
+    btc_signal = get_pattern_signal(np.array(BTC_PRICE_HISTORY))
+else:
+    btc_signal = {"trend": "N/A", "entropy_level": "N/A", "dominant_frequency": 0}
 
 st.subheader("📈 BTC/USDT Signal")
 col1, col2, col3 = st.columns(3)
 col1.metric("Trend", btc_signal['trend'])
 col2.metric("Entropy Level", btc_signal['entropy_level'])
-col3.metric("Dominant Frequency", f"{btc_signal['dominant_frequency']:.2f}")
+col3.metric("Dominant Frequency", f"{btc_signal.get('dominant_frequency', 0):.2f}")
 
 # Low-cap Coin Scanner
 st.subheader("🚀 Low-Cap Coin Candidates")
@@ -114,3 +115,6 @@ if lowcap_coins:
     st.table(pd.DataFrame(lowcap_coins))
 else:
     st.info("No low-cap coins found with strong volume spikes yet.")
+
+# Keep Dashboard Alive
+st.write("📡 Waiting for live price updates...")

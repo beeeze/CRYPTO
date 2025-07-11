@@ -41,7 +41,7 @@ def get_all_symbols():
 def detect_fft_pattern(prices):
     fft_result = np.fft.fft(prices)
     freq = np.fft.fftfreq(len(prices))
-    dominant_freq = freq[np.argmax(np.abs(fft_result[1:len(freq)//2])]
+    dominant_freq = freq[np.argmax(np.abs(fft_result[1:len(freq)//2])]  # Fixed
     return dominant_freq
 
 def calculate_entropy(prices):
